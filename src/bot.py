@@ -5,65 +5,94 @@ import subprocess
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from the .env file
 load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 ALERT_CHANNEL_ID = int(os.getenv('ALERT_CHANNEL_ID'))
 ALLOWED_USER_ID = int(os.getenv('ALLOWED_USER_ID'))
-SCRIPT_DIRECTORY = '/app/scripts/' # This maps to your host's ./scripts folder
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIRECTORY = os.path.join(BASE_DIR, "..", "scripts")
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+# Setting help_command=None removes the default !help so we can use our own
+bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
-    resource_monitor.start()
+    if not resource_monitor.is_running():
+        resource_monitor.start()
 
 @tasks.loop(seconds=60)
 async def resource_monitor():
     cpu_usage = psutil.cpu_percent()
     ram_usage = psutil.virtual_memory().percent
-
     if cpu_usage > 90.0 or ram_usage > 85.0:
         channel = bot.get_channel(ALERT_CHANNEL_ID)
         if channel:
             await channel.send(f"⚠️ **Server Resource Alert!**\n**CPU:** {cpu_usage}%\n**RAM:** {ram_usage}%")
 
-@bot.command()
-async def runscript(ctx, script_name: str):
-    if ctx.author.id != ALLOWED_USER_ID:
-        await ctx.send("You do not have permission to execute server scripts.")
-        return
+# --- COMMAND GROUP ---
 
-    if not script_name.endswith('.py'):
-        script_name += '.py'
-        
+@bot.group(name="poseidon", invoke_without_command=True)
+async def poseidon(ctx):
+    """The main command. Shows help if no subcommand is used."""
+    embed = discord.Embed(
+        title="🔱 Poseidon Bot Control Panel",
+        description="Available commands for server management:",
+        color=discord.Color.gold()
+    )
+    embed.add_field(name="📊 `!poseidon stats`Standard text", value="View real-time CPU/RAM/Disk usage.", inline=False)
+    embed.add_field(name="📂 `!poseidon scripts`Standard text", value="List all executable scripts in the scripts folder.", inline=False)
+    embed.add_field(name="🚀 `!poseidon run <name>`Standard text", value="Execute a specific script (e.g., `!poseidon run hello`).", inline=False)
+    embed.set_footer(text="Authorized users only.")
+    await ctx.send(embed=embed)
+
+@poseidon.command()
+async def stats(ctx):
+    """Fetch live server metrics."""
+    cpu = psutil.cpu_percent()
+    ram = psutil.virtual_memory().percent
+    disk_path = '/host' if os.path.exists('/host') else '/'
+    disk = psutil.disk_usage(disk_path).percent
+    
+    embed = discord.Embed(title="📊 System Performance", color=discord.Color.blue())
+    embed.add_field(name="CPU", value=f"```{cpu}%```", inline=True)
+    embed.add_field(name="RAM", value=f"```{ram}%```", inline=True)
+    embed.add_field(name="Disk", value=f"```{disk}%```", inline=True)
+    await ctx.send(embed=embed)
+
+@poseidon.command()
+async def scripts(ctx):
+    """List scripts in /scripts folder."""
+    try:
+        files = [f for f in os.listdir(SCRIPT_DIRECTORY) if f.endswith('.py')]
+        msg = "\n".join([f"• `{f}`" for f in files]) if files else "No scripts found."
+        await ctx.send(f"📂 **Available Scripts:**\n{msg}")
+    except Exception as e:
+        await ctx.send(f"❌ Error accessing directory: {e}")
+
+@poseidon.command()
+async def run(ctx, script_name: str):
+    """Execute a script."""
+    if ctx.author.id != ALLOWED_USER_ID:
+        return await ctx.send("⛔ **Access Denied.**")
+
+    if not script_name.endswith('.py'): script_name += '.py'
     script_path = os.path.join(SCRIPT_DIRECTORY, script_name)
 
     if not os.path.exists(script_path):
-        await ctx.send(f"Error: Script `{script_name}` not found in the scripts directory.")
-        return
+        return await ctx.send(f"❓ Script `{script_name}` not found.")
 
-    await ctx.send(f"Executing `{script_name}`...")
-
+    await ctx.send(f"⚙️ Executing `{script_name}`...")
+    
     try:
-        result = subprocess.run(['python', script_path], capture_output=True, text=True, timeout=30)
+        # Use 'python3' for Linux/Mac consistency
+        result = subprocess.run(['python3', script_path], capture_output=True, text=True, timeout=30)
         output = result.stdout if result.returncode == 0 else result.stderr
-        
-        if not output:
-            output = "Script executed successfully with no output."
-            
-        if len(output) > 1900:
-            output = output[:1900] + "\n...[Output truncated]"
-            
-        await ctx.send(f"**Output:**\n```text\n{output}\n```")
-        
-    except subprocess.TimeoutExpired:
-        await ctx.send("Error: Script execution timed out (exceeded 30 seconds).")
+        await ctx.send(f"✅ **Output:**\n```text\n{output[:1900] or 'Success (No Output)'}```")
     except Exception as e:
-        await ctx.send(f"An unexpected error occurred: {str(e)}")
+        await ctx.send(f"❌ **Execution Error:**\n`{e}`")
 
 bot.run(TOKEN)

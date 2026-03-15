@@ -3,10 +3,12 @@ version: "3.8"
 services:
   discord-bot:
     build: .
-    container_name: server_monitor_bot
+    image: poseidon-bot:latest
+    container_name: poseidon-bot
     restart: unless-stopped
     env_file:
       - .env
     volumes:
       - ./scripts:/app/scripts
+      - /:/host:ro
     pid: "host"
