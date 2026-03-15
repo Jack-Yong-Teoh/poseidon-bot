@@ -15,7 +15,6 @@ SCRIPT_DIRECTORY = os.path.join(BASE_DIR, "..", "scripts")
 
 intents = discord.Intents.default()
 intents.message_content = True
-# Setting help_command=None removes the default !help so we can use our own
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 @bot.event
@@ -52,16 +51,52 @@ async def poseidon(ctx):
 @poseidon.command()
 async def stats(ctx):
     """Fetch live server metrics."""
-    cpu = psutil.cpu_percent()
-    ram = psutil.virtual_memory().percent
-    disk_path = '/host' if os.path.exists('/host') else '/'
-    disk = psutil.disk_usage(disk_path).percent
-    
+    import time
+
+    # CPU from host /proc/stat
+    def get_host_cpu():
+        def read_stat():
+            with open('/host/proc/stat') as f:
+                line = f.readline()
+            vals = list(map(int, line.split()[1:8]))  # user nice system idle iowait irq softirq
+            idle = vals[3] + vals[4]  # idle + iowait
+            total = sum(vals)
+            return idle, total
+        idle1, total1 = read_stat()
+        time.sleep(1)
+        idle2, total2 = read_stat()
+        diff_total = total2 - total1
+        diff_idle = idle2 - idle1
+        return round(100 * (diff_total - diff_idle) / diff_total, 1) if diff_total else 0.0
+
+    # RAM from host /proc/meminfo
+    def get_host_ram():
+        mem = {}
+        with open('/host/proc/meminfo') as f:
+            for line in f:
+                parts = line.split()
+                mem[parts[0].rstrip(':')] = int(parts[1])
+        total = mem['MemTotal']
+        available = mem['MemAvailable']
+        return round(100 * (total - available) / total, 1)
+
+    # Disk — read host /proc/mounts to find the real root device, then statvfs
+    def get_host_disk():
+        st = os.statvfs('/host')
+        total = st.f_blocks * st.f_frsize
+        free = st.f_bfree * st.f_frsize
+        used = total - free
+        return round(100 * used / total, 1) if total else 0.0
+
+    cpu = get_host_cpu()
+    ram = get_host_ram()
+    disk = get_host_disk()
+
     embed = discord.Embed(title="📊 System Performance", color=discord.Color.blue())
     embed.add_field(name="CPU", value=f"```{cpu}%```", inline=True)
     embed.add_field(name="RAM", value=f"```{ram}%```", inline=True)
     embed.add_field(name="Disk", value=f"```{disk}%```", inline=True)
-    await ctx.send(embed=embed)
+    await ctx.send(embed=embed) 
 
 @poseidon.command()
 async def scripts(ctx):
@@ -88,7 +123,6 @@ async def run(ctx, script_name: str):
     await ctx.send(f"⚙️ Executing `{script_name}`...")
     
     try:
-        # Use 'python3' for Linux/Mac consistency
         result = subprocess.run(['python3', script_path], capture_output=True, text=True, timeout=30)
         output = result.stdout if result.returncode == 0 else result.stderr
         await ctx.send(f"✅ **Output:**\n```text\n{output[:1900] or 'Success (No Output)'}```")
