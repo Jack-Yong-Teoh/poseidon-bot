@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 import psutil
 import subprocess
 import os
+import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,8 +26,25 @@ async def on_ready():
 
 @tasks.loop(seconds=60)
 async def resource_monitor():
-    cpu_usage = psutil.cpu_percent()
-    ram_usage = psutil.virtual_memory().percent
+    def read_stat():
+        with open('/host/proc/stat') as f:
+            vals = list(map(int, f.readline().split()[1:8]))
+        return vals[3] + vals[4], sum(vals)
+
+    idle1, total1 = read_stat()
+    await asyncio.sleep(1)
+    idle2, total2 = read_stat()
+    diff_total = total2 - total1
+    diff_idle = idle2 - idle1
+    cpu_usage = round(100 * (diff_total - diff_idle) / diff_total, 1) if diff_total else 0.0
+
+    mem = {}
+    with open('/host/proc/meminfo') as f:
+        for line in f:
+            parts = line.split()
+            mem[parts[0].rstrip(':')] = int(parts[1])
+    ram_usage = round(100 * (mem['MemTotal'] - mem['MemAvailable']) / mem['MemTotal'], 1)
+
     if cpu_usage > 90.0 or ram_usage > 85.0:
         channel = bot.get_channel(ALERT_CHANNEL_ID)
         if channel:
@@ -51,44 +69,33 @@ async def poseidon(ctx):
 @poseidon.command()
 async def stats(ctx):
     """Fetch live server metrics."""
-    import time
 
-    # CPU from host /proc/stat
-    def get_host_cpu():
-        def read_stat():
-            with open('/host/proc/stat') as f:
-                line = f.readline()
-            vals = list(map(int, line.split()[1:8]))  # user nice system idle iowait irq softirq
-            idle = vals[3] + vals[4]  # idle + iowait
-            total = sum(vals)
-            return idle, total
-        idle1, total1 = read_stat()
-        time.sleep(1)
-        idle2, total2 = read_stat()
-        diff_total = total2 - total1
-        diff_idle = idle2 - idle1
-        return round(100 * (diff_total - diff_idle) / diff_total, 1) if diff_total else 0.0
+    def read_stat():
+        with open('/host/proc/stat') as f:
+            vals = list(map(int, f.readline().split()[1:8]))
+        return vals[3] + vals[4], sum(vals)
 
-    # RAM from host /proc/meminfo
     def get_host_ram():
         mem = {}
         with open('/host/proc/meminfo') as f:
             for line in f:
                 parts = line.split()
                 mem[parts[0].rstrip(':')] = int(parts[1])
-        total = mem['MemTotal']
-        available = mem['MemAvailable']
-        return round(100 * (total - available) / total, 1)
+        return round(100 * (mem['MemTotal'] - mem['MemAvailable']) / mem['MemTotal'], 1)
 
-    # Disk — read host /proc/mounts to find the real root device, then statvfs
     def get_host_disk():
         st = os.statvfs('/host')
         total = st.f_blocks * st.f_frsize
-        free = st.f_bfree * st.f_frsize
-        used = total - free
+        used = (st.f_blocks - st.f_bfree) * st.f_frsize
         return round(100 * used / total, 1) if total else 0.0
 
-    cpu = get_host_cpu()
+    idle1, total1 = read_stat()
+    await asyncio.sleep(1)
+    idle2, total2 = read_stat()
+    diff_total = total2 - total1
+    diff_idle = idle2 - idle1
+    cpu = round(100 * (diff_total - diff_idle) / diff_total, 1) if diff_total else 0.0
+
     ram = get_host_ram()
     disk = get_host_disk()
 
@@ -96,7 +103,7 @@ async def stats(ctx):
     embed.add_field(name="CPU", value=f"```{cpu}%```", inline=True)
     embed.add_field(name="RAM", value=f"```{ram}%```", inline=True)
     embed.add_field(name="Disk", value=f"```{disk}%```", inline=True)
-    await ctx.send(embed=embed) 
+    await ctx.send(embed=embed)
 
 @poseidon.command()
 async def scripts(ctx):
@@ -121,7 +128,7 @@ async def run(ctx, script_name: str):
         return await ctx.send(f"❓ Script `{script_name}` not found.")
 
     await ctx.send(f"⚙️ Executing `{script_name}`...")
-    
+
     try:
         result = subprocess.run(['python3', script_path], capture_output=True, text=True, timeout=30)
         output = result.stdout if result.returncode == 0 else result.stderr
