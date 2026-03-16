@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands, tasks
-import psutil
+# import psutil
 import subprocess
 import os
 import asyncio
@@ -24,7 +24,7 @@ async def on_ready():
     if not resource_monitor.is_running():
         resource_monitor.start()
 
-@tasks.loop(seconds=60)
+@tasks.loop(seconds=900)
 async def resource_monitor():
     def read_stat():
         with open('/host/proc/stat') as f:
@@ -130,7 +130,7 @@ async def run(ctx, script_name: str):
     await ctx.send(f"⚙️ Executing `{script_name}`...")
 
     try:
-        result = subprocess.run(['python3', script_path], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(['python3', script_path], capture_output=True, text=True, timeout=60)
         output = result.stdout if result.returncode == 0 else result.stderr
         await ctx.send(f"✅ **Output:**\n```text\n{output[:1900] or 'Success (No Output)'}```")
     except Exception as e:

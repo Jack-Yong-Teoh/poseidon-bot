@@ -78,7 +78,7 @@ def check_services():
         resp_latency = 0
         
         try:
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=60) as response:
                 # Removed * 1000
                 resp_latency = time.time() - start_time
                 if response.status == 200:
