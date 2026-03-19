@@ -2,7 +2,7 @@
 name = "poseidon-bot"
 version = "0.1.0"
 description = "Discord server monitoring bot"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
   "discord.py>=2.4.0,<3.0.0",
   "psutil>=5.9.0,<7.0.0",
