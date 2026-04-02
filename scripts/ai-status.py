@@ -26,7 +26,7 @@ SERVICES = [
         "model": os.getenv('AI_MODEL_2', '')
     },
     {
-        "name": "Qwen3-Coder-Plus (iflow)",
+        "name": "cli-proxy-api",
         "url": f"{os.getenv('AI_API_URL_3', '')}/chat/completions",
         "key": os.getenv('AI_API_KEY_3', ''),
         "model": os.getenv('AI_MODEL_3', '')
